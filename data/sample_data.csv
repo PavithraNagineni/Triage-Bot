@@ -1,0 +1,5 @@
+tweet_id,author_id,inbound,created_at,text,response_tweet_id,in_response_to_tweet_id
+1000,cust_1000,True,Mon Jan 05 12:00:00 +0000 2026,"@AppleSupport My iPhone won't turn on after the update",1001,
+1001,AppleSupport,False,Mon Jan 05 12:05:00 +0000 2026,"Sorry to hear that! Please try a force restart and let us know if that helps.",,1000
+1010,cust_1010,True,Mon Jan 05 12:00:00 +0000 2026,"@AppleSupport I can't log into my Apple ID",1011,
+1011,AppleSupport,False,Mon Jan 05 12:05:00 +0000 2026,"Please try resetting your password at iforgot.apple.com.",,1010

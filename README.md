@@ -1,119 +1,201 @@
-# Hiver Take-Home — AI Support Agent for AppleSupport (Twitter)
+# Triage-Bot: AppleSupport AI Support Agent
 
-An AI customer-support agent that: (1) classifies incoming messages into a
-brand-specific intent taxonomy, (2) drafts a reply grounded in how the brand
-has historically resolved similar issues, and (3) decides auto-handle vs.
-escalate-to-human with a stated reason.
+Triage-Bot is a small, reproducible customer-support agent built for the
+Hiver SDE take-home assignment. It uses the **Customer Support on Twitter**
+dataset and targets the `AppleSupport` handle.
 
-Built against the Kaggle **Customer Support on Twitter** dataset
-(`thoughtvector/customer-support-on-twitter`), targeting the `AppleSupport`
-brand handle by default (edit `SUPPORT_BRAND` in `src/config.py` to retarget).
+Given one incoming customer message, it:
 
-## What's here (the LLM/agent side — this repo covers deliverables #1–#3)
+1. assigns one of eight support intents;
+2. retrieves similar historical AppleSupport conversations;
+3. drafts a reply based on those past resolutions; and
+4. decides whether to auto-handle the message or escalate it to a human,
+   including an explanation.
 
-```
-src/
-  config.py          intent taxonomy, brand, escalation policy — edit here
-  data_loader.py      parses twcs.csv, reconstructs (customer -> brand reply) pairs
-  retriever.py         TF-IDF grounding retriever over resolved pairs
-  classifier.py        LLM intent classifier (prompted, JSON output)
-  reply_drafter.py     grounded reply drafter (RAG-lite over retriever hits)
-  escalation.py        rule + LLM hybrid auto-handle/escalate decision
-  pipeline.py           orchestrates the above into one PipelineResult
-  llm_client.py         provider-agnostic LLM call wrapper (Anthropic default, OpenAI supported)
-scripts/
-  run_pipeline.py       CLI: run the agent over sampled/given messages -> results.csv
-  build_golden_set.py    samples a stratified pool for you to hand-label into a golden set
-eval/
-  eval_harness.py        classification metrics + baselines, escalation agreement, LLM-as-judge
-data/
-  sample_data.csv         tiny offline sample (20 pairs) so the repo runs with zero setup
-```
+The project is designed to be inspectable rather than magical: every decision
+is returned as structured data, the baselines are included, and the limitations
+are reported honestly.
 
-The repository also includes `REPORT.md`, `DECISION_LOG.md`, the checked-in
-golden labels, and the evaluation rubric. The only intentionally manual step
-left is human scoring of a small reply-quality calibration sample, because an
-AI-generated score cannot honestly be called a human judgment.
+## Results at a glance
 
-## Setup
+The checked-in golden set contains **196 hand-labeled examples**.
 
-```bash
+| System | Accuracy | Macro-F1 |
+|---|---:|---:|
+| Majority-class baseline | 31.6% | 6.0% |
+| Keyword-rule baseline | 62.2% | 55.3% |
+| Triage-Bot offline pipeline | **65.8%** | **60.4%** |
+
+Escalation agreement with human labels was:
+
+- Accuracy: **67.9%**
+- Precision: **35.7%**
+- Recall: **76.9%**
+
+For reply quality, an automated judge scored 196 replies at 4.0/5. On a
+separate 25-example human calibration sample, judge-human agreement was **32%
+exact**, **84% within one point**, with **0.88 mean absolute error**. The low
+exact-match rate is an important limitation, not something hidden.
+
+See [REPORT.md](REPORT.md) for the full report and failure analysis.
+
+## Quick start: reproduce the evaluation
+
+These commands are for **PowerShell on Windows**. The default offline mode
+needs no API key and avoids rate limits.
+
+```powershell
+cd C:\path\to\Triage-Bot
 pip install -r requirements.txt
-# Reproducible offline mode (default; no key or network required)
-$env:LLM_PROVIDER="offline"           # PowerShell
-# Optional hosted mode:
-$env:ANTHROPIC_API_KEY="sk-..."        # or OPENAI_API_KEY + LLM_PROVIDER=openai
+$env:LLM_PROVIDER = "offline"
+
+python eval\eval_harness.py `
+  --golden data\golden_set.csv `
+  --skip-judge `
+  --output eval\eval_results_reproduced.csv
 ```
 
-Download `twcs.csv` from Kaggle and place it at `data/twcs.csv`. **If you skip
-this step, everything below still runs** against the bundled 20-pair
-`data/sample_data.csv` — useful for a fast sanity check, not for real results.
+This runs the pipeline and prints the classification and escalation metrics.
+With the included golden set, it completes in a few minutes after the raw
+dataset has been loaded.
 
-## Reproduce the headline results (< 15 minutes)
+## Run the agent on sample messages
 
-```bash
-# 1. Run the agent over a random sample of real messages (smoke test)
-python scripts/run_pipeline.py --n 30 --output results_sample.csv
+Download `twcs.csv` from Kaggle
+(`thoughtvector/customer-support-on-twitter`) and place it at
+`data\twcs.csv`. The raw file is intentionally not committed because it is
+large. Then run:
 
-# 2. Build a stratified pool to hand-label into your golden set
-python scripts/build_golden_set.py --total 200 --output data/golden_set_template.csv
-# -> open data/golden_set_template.csv, fill in true_intent / should_escalate /
-#    escalate_reason_gold by hand for each row, save as data/golden_set.csv
-
-# 3. Run the evaluation harness against your labeled golden set
-python eval/eval_harness.py --golden data/golden_set.csv --output eval/eval_results.csv
+```powershell
+$env:LLM_PROVIDER = "offline"
+python scripts\run_pipeline.py --n 30 --output results_sample.csv
 ```
 
-Step 3 prints: classification accuracy/macro-F1 for the pipeline vs. a
-**trivial baseline** (majority-class intent) and a **simple baseline**
-(hand-written keyword rules), escalation agreement (accuracy/precision/recall)
-against your labels, and LLM-as-judge reply-quality scores. If you add a
-`human_judge_score` column for a subset of golden-set rows (score the drafted
-replies yourself 1-5 after step 3's first pass), re-run step 3 and it will
-also report judge-vs-human agreement — required for deliverable #3.
+The output CSV contains the message, predicted intent, confidence, drafted
+reply, grounding details, escalation decision, and escalation reason.
 
-## Design choices worth knowing before you read the code
+To run your own input file:
 
-- **Retrieval is TF-IDF, not embeddings.** Fully offline, no model download,
-  fast at this scale. Grounding quality depends on the retrieved precedent
-  being lexically similar, which is a real limitation — call this out in
-  your failure analysis if paraphrased issues aren't retrieved well.
-- **Escalation is a rule+LLM hybrid, not pure LLM.** Keyword triggers and
-  policy-flagged intents (billing disputes) escalate deterministically before
-  the LLM ever gets a say — this is intentional and auditable, not a
-  cost-saving shortcut. See `src/escalation.py`'s docstring.
-- **The classifier is prompted, not fine-tuned.** Faster to iterate at
-  take-home scale; a fine-tuned classifier is a reasonable "what I'd do with
-  one more week" item.
-- **Every LLM call returns strict JSON** (`llm_client.complete_json`) so the
-  pipeline never depends on parsing free text.
+```powershell
+python scripts\run_pipeline.py `
+  --input path\to\messages.csv `
+  --text-col message `
+  --output results.csv
+```
 
-## Reproducibility and honest evaluation notes
+## Optional hosted LLM mode
 
-The checked-in `data/golden_set.csv` contains 196 hand-labeled examples. The
-default offline provider is deterministic and exists so a reviewer can
-reproduce the pipeline and metrics without an API key or a rate-limit failure.
-It is a heuristic baseline, not the claimed production-quality LLM. Hosted
-providers remain supported by setting `LLM_PROVIDER` and the corresponding key.
-The grounding corpus is capped at 25,000 fixed-seed pairs by default for a
-sub-15-minute local evaluation; set `MAX_GROUNDING_PAIRS=0` for the full corpus.
-For the required judge-vs-human calibration, fill `human_judge_score` for the
-25 rows in `data/human_judge_template.csv`, then run the command in
-[eval/rubric.md](eval/rubric.md). The harness reports exact match, within-one
-agreement, and MAE only when those scores exist. It never fabricates human
-judgments.
+Offline mode is the reproducible evaluation path. To use a hosted model
+instead, copy `.env.example` to `.env` and provide a valid key. Supported
+providers are Anthropic and OpenAI-compatible providers:
 
-See [REPORT.md](REPORT.md) for the problem framing, baselines, measured
-results, failure analysis, misleading-number section, and next steps.
-See [DECISION_LOG.md](DECISION_LOG.md) for the non-obvious implementation
-decisions.
+```powershell
+$env:LLM_PROVIDER = "anthropic"
+$env:ANTHROPIC_API_KEY = "your-key"
+python scripts\run_pipeline.py --n 10 --output hosted_results.csv
+```
 
-## Known gaps (be upfront about these in your report)
+Never commit `.env` or API keys.
 
-- `data_loader.py` only reconstructs first-hop (customer -> direct brand
-  reply) pairs, not full multi-turn threads — documented, not hidden.
-- The intent taxonomy in `config.py` is a reasonable starting point but you
-  should re-derive it from ~100 real threads for your actual chosen brand
-  before trusting it (the assignment explicitly wants taxonomy from data).
-- No cost/latency logging is wired in yet — add a token-usage counter to
-  `llm_client.py` if your report wants to discuss cost per ticket.
+## How the pipeline works
+
+```text
+Incoming message
+       |
+       v
+Intent classifier
+       |
+       +--> TF-IDF retriever --> historical customer/reply examples
+       |                              |
+       v                              v
+Escalation policy <----------- grounded reply drafter
+       |
+       v
+Structured result: intent, reply, grounded?, escalate?, reason
+```
+
+### Intent taxonomy
+
+The taxonomy is intentionally small and brand-specific:
+
+- `account_access`
+- `billing_dispute`
+- `delivery_order_issue`
+- `product_bug_report`
+- `how_to_question`
+- `general_complaint`
+- `praise_or_thanks`
+- `other`
+
+### Grounding
+
+`data_loader.py` reconstructs direct customer-to-brand reply pairs from the
+Twitter dataset. `retriever.py` uses TF-IDF and cosine similarity to find up
+to three similar resolved cases. Weak matches are not treated as strong
+evidence. This is fast and reproducible, but it can miss paraphrases.
+
+### Escalation
+
+The escalation policy is deliberately hybrid:
+
+- high-risk keywords always escalate;
+- billing disputes always escalate;
+- low-confidence classifications escalate;
+- ungrounded drafts escalate;
+- remaining cases receive a model judgment.
+
+This prevents the agent from confidently inventing a refund, legal response,
+or account-specific resolution.
+
+## Evaluation assets
+
+| Path | Purpose |
+|---|---|
+| `data\golden_set.csv` | 196 hand-labeled evaluation examples |
+| `data\human_judge_template.csv` | 25-row human calibration sample |
+| `eval\eval_harness.py` | Metrics, baselines, escalation, judge |
+| `eval\eval_results.csv` | Main evaluation output |
+| `eval\eval_results_calibrated.csv` | Output including human calibration |
+| `eval\rubric.md` | Reply-quality scoring rubric |
+| `REPORT.md` | Six-page-style report and failure analysis |
+| `DECISION_LOG.md` | Non-obvious design decisions |
+
+To reproduce the judge-human calibration after reviewing the 25 replies:
+
+```powershell
+python eval\eval_harness.py `
+  --golden data\golden_set.csv `
+  --human-calibration data\human_judge_template.csv `
+  --output eval\eval_results_calibrated.csv
+```
+
+## Repository layout
+
+```text
+src/
+  config.py          brand, taxonomy, thresholds, and policy
+  data_loader.py     dataset loading and reply-pair reconstruction
+  retriever.py       TF-IDF historical-case retrieval
+  classifier.py      intent classification
+  reply_drafter.py   grounded reply generation
+  escalation.py      auto-handle/escalation policy
+  pipeline.py        end-to-end orchestration
+  llm_client.py      offline and hosted provider adapter
+scripts/
+  run_pipeline.py    command-line runner
+  build_golden_set.py reproducible sampling helper
+eval/
+  eval_harness.py    evaluation and baseline comparison
+```
+
+## Scope and limitations
+
+This is a support-triage prototype, not a production support system. It does
+not access private order/account systems, process payments, promise refunds,
+or reconstruct every multi-turn Twitter thread. The evaluation set is small
+and brand-specific, and the offline provider is a transparent heuristic path,
+not evidence that a hosted LLM will perform identically.
+
+The next improvements would be full-thread reconstruction, time-split
+evaluation, embedding retrieval, resolution-quality filtering, and privacy-safe
+account/order tools behind mandatory human approval.
