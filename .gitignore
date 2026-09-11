@@ -1,0 +1,10 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+data/twcs.csv
+results*.csv
+golden_results.csv
+pd.DataFrame
+eval/eval_results_offline.csv
