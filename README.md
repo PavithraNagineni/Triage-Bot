@@ -38,6 +38,8 @@ exact**, **84% within one point**, with **0.88 mean absolute error**. The low
 exact-match rate is an important limitation, not something hidden.
 
 See [REPORT.md](REPORT.md) for the full report and failure analysis.
+The same report is available as a formatted Word document:
+[REPORT.docx](REPORT.docx).
 
 ## Quick start: reproduce the evaluation
 

@@ -72,7 +72,8 @@ is small, stratified, and derived from the same brand corpus used for
 retrieval. The offline provider is a transparent heuristic baseline, while a
 hosted LLM run has different cost, latency, and failure modes. Labels are
 single-intent even when a tweet is genuinely multi-intent. Finally, judge
-scores are not human evidence until the calibration file is completed.
+agreement is based on only 25 human-scored examples and should not be
+generalized beyond this calibration sample.
 
 ## 6. One more week
 
