@@ -75,7 +75,7 @@ single-intent even when a tweet is genuinely multi-intent. Finally, judge
 agreement is based on only 25 human-scored examples and should not be
 generalized beyond this calibration sample.
 
-## 6. One more week
+## 6. If more time 
 
 I would (1) reconstruct full threads with attribution tests, (2) add a
 time-split held-out evaluation to reduce retrieval leakage, (3) compare TF-IDF
