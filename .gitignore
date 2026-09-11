@@ -8,3 +8,6 @@ results*.csv
 golden_results.csv
 pd.DataFrame
 eval/eval_results_offline.csv
+hiver-agent/
+check.py
+eval_harness_source.txt
